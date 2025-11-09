@@ -1,0 +1,153 @@
+package main
+
+import (
+	"flag"
+	"log"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+var logFile = os.ExpandEnv("$HOME/.kraise.log")
+
+func kdo(args ...string) ([]string, error) {
+	cmd := exec.Command("kdotool", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return []string{}, nil
+	}
+	return lines, nil
+}
+
+func setIntersection(a, b []string) []string {
+	set := make(map[string]struct{})
+	for _, v := range a {
+		set[v] = struct{}{}
+	}
+	var result []string
+	for _, v := range b {
+		if _, ok := set[v]; ok {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func setDifference(a, b []string) []string {
+	set := make(map[string]struct{})
+	for _, v := range b {
+		set[v] = struct{}{}
+	}
+	var result []string
+	for _, v := range a {
+		if _, ok := set[v]; !ok {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func main() {
+	var wmclass, title, excludeTitle, runCmd string
+
+	flag.StringVar(&wmclass, "c", "", "window class")
+	flag.StringVar(&wmclass, "wmclass", "", "window class")
+	flag.StringVar(&title, "t", "", "window title")
+	flag.StringVar(&title, "title", "", "window title")
+	flag.StringVar(&excludeTitle, "e", "", "exclude title")
+	flag.StringVar(&excludeTitle, "exclude-title", "", "exclude title")
+	flag.StringVar(&runCmd, "l", "", "run command if no match")
+	flag.StringVar(&runCmd, "run", "", "run command if no match")
+	flag.Parse()
+
+	activeWindow, err := kdo("getactivewindow")
+	if err != nil || len(activeWindow) == 0 {
+		log.Fatalf("Failed to get active window: %v", err)
+	}
+	active := activeWindow[0]
+
+	allWindows, err := kdo("search")
+	if err != nil {
+		log.Fatalf("Failed to list windows: %v", err)
+	}
+
+	if wmclass != "" {
+		classWindows, err := kdo("search", "--class", wmclass)
+		if err != nil {
+			log.Fatalf("Failed to search by class: %v", err)
+		}
+		allWindows = setIntersection(allWindows, classWindows)
+	}
+
+	if title != "" {
+		titleWindows, err := kdo("search", "--name", title)
+		if err != nil {
+			log.Fatalf("Failed to search by title: %v", err)
+		}
+		allWindows = setIntersection(allWindows, titleWindows)
+	}
+
+	var excludeWindows []string
+	if excludeTitle != "" {
+		excludeWindows, err = kdo("search", "--name", excludeTitle)
+		if err != nil {
+			log.Fatalf("Failed to search exclude title: %v", err)
+		}
+	}
+
+	remaining := setDifference(allWindows, excludeWindows)
+
+	// Logging
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("Failed to open log file: %v", err)
+	}
+	defer f.Close()
+	logger := log.New(f, "", 0)
+	logger.Printf("\nactive_window=%s\nwmclass=%s\ntitle=%s\nexclude_title=%s\nrun=%s\n", active, wmclass, title, excludeTitle, runCmd)
+	logger.Printf("remaining=%v\n", remaining)
+
+	if len(remaining) > 0 {
+		// Check if active window is in remaining
+		found := -1
+		for i, w := range remaining {
+			if w == active {
+				found = i
+				break
+			}
+		}
+		if found >= 0 {
+			// Cycle to next window
+			next := (found + 1) % len(remaining)
+			cmd := exec.Command("kdotool", "windowactivate", remaining[next])
+			if err := cmd.Run(); err != nil {
+				log.Fatalf("Failed to activate window: %v", err)
+			}
+		} else {
+			// Activate first match
+			cmd := exec.Command("kdotool", "windowactivate", remaining[0])
+			if err := cmd.Run(); err != nil {
+				log.Fatalf("Failed to activate window: %v", err)
+			}
+		}
+	} else {
+		if runCmd != "" {
+			parts := strings.Fields(runCmd)
+			if len(parts) == 0 {
+				return
+			}
+			cmd := exec.Command(parts[0], parts[1:]...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				log.Fatalf("Failed to run command: %v", err)
+			}
+		} else {
+			logger.Println("No match")
+		}
+	}
+}
