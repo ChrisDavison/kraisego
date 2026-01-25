@@ -10,6 +10,29 @@ import (
 
 var logFile = os.ExpandEnv("$HOME/.kraise.log")
 
+type parsedArgs struct {
+	wmclass      string
+	title        string
+	excludeTitle string
+	runCmd       string
+}
+
+func parseArgs() parsedArgs {
+	var args parsedArgs
+
+	flag.StringVar(&args.wmclass, "c", "", "window class")
+	flag.StringVar(&args.wmclass, "wmclass", "", "window class")
+	flag.StringVar(&args.title, "t", "", "window title")
+	flag.StringVar(&args.title, "title", "", "window title")
+	flag.StringVar(&args.excludeTitle, "e", "", "exclude title")
+	flag.StringVar(&args.excludeTitle, "exclude-title", "", "exclude title")
+	flag.StringVar(&args.runCmd, "l", "", "run command if no match")
+	flag.StringVar(&args.runCmd, "run", "", "run command if no match")
+	flag.Parse()
+
+	return args
+}
+
 func kdo(args ...string) ([]string, error) {
 	cmd := exec.Command("kdotool", args...)
 	out, err := cmd.Output()
@@ -52,17 +75,7 @@ func setDifference(a, b []string) []string {
 }
 
 func main() {
-	var wmclass, title, excludeTitle, runCmd string
-
-	flag.StringVar(&wmclass, "c", "", "window class")
-	flag.StringVar(&wmclass, "wmclass", "", "window class")
-	flag.StringVar(&title, "t", "", "window title")
-	flag.StringVar(&title, "title", "", "window title")
-	flag.StringVar(&excludeTitle, "e", "", "exclude title")
-	flag.StringVar(&excludeTitle, "exclude-title", "", "exclude title")
-	flag.StringVar(&runCmd, "l", "", "run command if no match")
-	flag.StringVar(&runCmd, "run", "", "run command if no match")
-	flag.Parse()
+	args := parseArgs()
 
 	activeWindow, err := kdo("getactivewindow")
 	if err != nil || len(activeWindow) == 0 {
@@ -75,16 +88,16 @@ func main() {
 		log.Fatalf("Failed to list windows: %v", err)
 	}
 
-	if wmclass != "" {
-		classWindows, err := kdo("search", "--class", wmclass)
+	if args.wmclass != "" {
+		classWindows, err := kdo("search", "--class", args.wmclass)
 		if err != nil {
 			log.Fatalf("Failed to search by class: %v", err)
 		}
 		allWindows = setIntersection(allWindows, classWindows)
 	}
 
-	if title != "" {
-		titleWindows, err := kdo("search", "--name", title)
+	if args.title != "" {
+		titleWindows, err := kdo("search", "--name", args.title)
 		if err != nil {
 			log.Fatalf("Failed to search by title: %v", err)
 		}
@@ -92,8 +105,8 @@ func main() {
 	}
 
 	var excludeWindows []string
-	if excludeTitle != "" {
-		excludeWindows, err = kdo("search", "--name", excludeTitle)
+	if args.excludeTitle != "" {
+		excludeWindows, err = kdo("search", "--name", args.excludeTitle)
 		if err != nil {
 			log.Fatalf("Failed to search exclude title: %v", err)
 		}
@@ -108,7 +121,7 @@ func main() {
 	}
 	defer f.Close()
 	logger := log.New(f, "", 0)
-	logger.Printf("\nactive_window=%s\nwmclass=%s\ntitle=%s\nexclude_title=%s\nrun=%s\n", active, wmclass, title, excludeTitle, runCmd)
+	logger.Printf("\nactive_window=%s\nwmclass=%s\ntitle=%s\nexclude_title=%s\nrun=%s\n", active, args.wmclass, args.title, args.excludeTitle, args.runCmd)
 	logger.Printf("remaining=%v\n", remaining)
 
 	if len(remaining) > 0 {
@@ -135,8 +148,8 @@ func main() {
 			}
 		}
 	} else {
-		if runCmd != "" {
-			parts := strings.Fields(runCmd)
+		if args.runCmd != "" {
+			parts := strings.Fields(args.runCmd)
 			if len(parts) == 0 {
 				return
 			}
